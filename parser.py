@@ -57,6 +57,17 @@ class Item(object):
             return '~{a}'.format(a=self.a)
         else:
             return self.__repr__()
+    def compute_key(self, k, lookup):
+        ph_key_match = r"(\$ph\d+)"
+        while has_ph(k):
+            # Match and replace
+            for mnum, match in enumerate(re.finditer(ph_key_match, k, re.MULTILINE)):
+                g = match.group(0)
+                newlabel = '({})'.format(lookup[g].label())
+                if type(lookup[g]).__name__ == 'NOT':
+                    newlabel = strip_fully_surrounded(newlabel)
+                k = strip_fully_surrounded(re.sub(ph_key_match, newlabel, k))
+        return k
 
 class AND(Item):
     def __init__(self, a, b):
@@ -73,48 +84,24 @@ class AND(Item):
         #print('kz', kz)
         k1 = str(self.a)
         k2 = str(self.b)
-        ph_key_match = r"(\$ph\d+)"
         if ph is not None:
-            while has_ph(k2):
-                # Match and replace
-                for mnum, match in enumerate(re.finditer(ph_key_match, k2, re.MULTILINE)):
-                    g = match.group(0)
-                    newlabel = '({})'.format(ph[g].label())
-                    k2 = strip_fully_surrounded(re.sub(ph_key_match, newlabel, k2))
-            while has_ph(k1):
-                # Match and replace
-                for mnum, match in enumerate(re.finditer(ph_key_match, k1, re.MULTILINE)):
-                    g = match.group(0)
-                    newlabel = '({})'.format(ph[g].label())
-                    k1 = strip_fully_surrounded(re.sub(ph_key_match, newlabel, k1))
-
+            k1 = self.compute_key(k1, ph)
+            k2 = self.compute_key(k2, ph)
         return np.logical_and(kz[k1], kz[k2])
 class OR(Item):
     def __init__(self, a, b):
         super().__init__(a,b)
+    compute_fn = np.logical_or # maybe use this, quicker
     def compute(self, kz, ph=None):
         k1 = str(self.a)
         k2 = str(self.b)
-        ph_key_match = r"(\$ph\d+)"
         if ph is not None:
-            while has_ph(k2):
-                # Match and replace
-                for mnum, match in enumerate(re.finditer(ph_key_match, k2, re.MULTILINE)):
-                    g = match.group(0)
-                    newlabel = '({})'.format(ph[g].label())
-                    k2 = strip_fully_surrounded(re.sub(ph_key_match, newlabel, k2))
-            while has_ph(k1):
-                # Match and replace
-                for mnum, match in enumerate(re.finditer(ph_key_match, k1, re.MULTILINE)):
-                    g = match.group(0)
-                    newlabel = '({})'.format(ph[g].label())
-                    k1 = strip_fully_surrounded(re.sub(ph_key_match, newlabel, k1))
+            k1 = self.compute_key(k1, ph)
+            k2 = self.compute_key(k2, ph)
         #print('OR kz', type(kz), k1, ' + ', k2)
         #print(kz)
         # kz: dict of key: binary value, {'q': 0, 'p': 1, 's': 0}
-        zb = np.logical_or(kz[k1], kz[k2])
-        #print('Returning ', zb)
-        return zb
+        return np.logical_or(kz[k1], kz[k2])
 class NOT(Item):
     def __init__(self, a):
         super().__init__(a.lstrip('~'), b='')
@@ -200,21 +187,16 @@ class Parse(object):
 
                 s = s[0:srch] + phkey + s[srch+len(k):]
             #print('returning s', s, self.ph_stack)
-            #assert False
             return s
 
             # Replace the NOTs with the placeholders
         elif re.search(_or, s):
             m = self.match(_or, s)
-            #assert False
-            #print('checkin or', m, self.ph_stack)
-            #assert False
-            return OR(*m)#'OR:{},{}'.format(*m)
-            #print('Match vars {s}={m}'.format(s=s, m=m))
+            return OR(*m)
         elif re.match(_and, s):
             #print('checkin and')
             m = self.match(_and, s)
-            return AND(*m)#'AND:{},{}'.format(*m)
+            return AND(*m)
         return s
 
     def match(self, r, s, simple=True):
@@ -241,40 +223,15 @@ class Parse(object):
         #self.ph_stack['$ph{}'.format(len(self.ph_stack) + 1)] = self.s
         all_labels = {}
         for key, c in sorted(self.ph_stack.items(), reverse=False):
-            n = type(c).__name__
-            label = c.label()
-            #print('=n', n, c, label)
-            while True:
-                if '$ph' not in label:
-                    all_labels[key] = label
-                    break
-                else:
-                    # uh do i need this or just use resolve_label
-                    regex_use = _and if n == 'AND' else _or
-                    matches = self.match(regex_use, label)
-                    #print('matchez', matches, label)
-                    for phkey in matches:
-                        if phkey.startswith('$ph'):
-                            old_label = label
-                            #print('NNNNNN',n, n in ['AND', 'OR'])
-                            if n in ['AND', 'OR']:
-                                new_label = '(' + self.ph_stack[phkey].label() + ')'
-                            else:
-                                new_label = self.ph_stack[phkey].label()
-                                print('new label', new_label)
-                            label = re.sub(ph_key_match, new_label, label)
-                            #print('new label match', old_label, ' => ', label)
-                    
-            #print('shard', key, c.label(), c)#
+            #print('=n', type(c).__name__, c, label)
+            label = self.resolve_label(c.label())
+
+            all_labels[key] = label
+
             r.append((label, c))
 
-        #print('all labels', all_labels)
         # Sort based on label length
         r = sorted(r, key=lambda x: len(x[0]))
-        #print('rrrrrrr', r)
-        for t in r:
-            label, c = t
-            #print(label, ',', c, ':', c.has_ph)
 
         # Finally, add on overall thing
         r.append((self.resolve_label(self.s.label()), self.s))
@@ -290,24 +247,20 @@ class Parse(object):
                 m = self.match(ph_key_match, s, simple=False)
                 for phkey in m:
                     if phkey.startswith('$ph'):
-                        new_label = '(' + self.ph_stack[phkey].label() + ')'
+                        other_key = self.ph_stack[phkey]
+                        if type(other_key).__name__ in ['AND', 'OR']:
+                            new_label = '(' + other_key.label() + ')'
+                        else:
+                            new_label = other_key.label()
                         s = re.sub(re.escape(phkey), new_label, s)
         return s
 
     def binstrappend(self, kz):
         # return all the calculated columns
-        #print('Stack', self.ph_stack)
         binstr = []
         for c in self.components():
             val = c[1].compute(kz, ph=self.ph_stack)
             kz[c[0]] = val
             binstr.append(val)
-        #print(binstr)
         return binstr
 
-
-#Parse(c).parse()
-#Parse(d).parse()
-#Parse(e).parse()
-
-#re_and = re.finditer(r"(\w'?)\s?\.\s?(~?\w\'?)", s, re.MULTILINE)
