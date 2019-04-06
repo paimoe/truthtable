@@ -39,7 +39,7 @@ LIMITATIONS:
 """
 
 def main(s, opts):
-    p = Parse(strip_fully_surrounded(s))
+    p = Parse(s)
     p.parse()
 
     # Get all alphabet chars in string, set() uniqueifys it
@@ -101,7 +101,10 @@ if __name__ == '__main__':
     parser.add_argument('--fmt', default='int', nargs='?', help='int (default), [b]ool, tf (T or F)')
     parser.add_argument('--limit', default=32, help='Number of rows (default 32)')
     parser.add_argument('--tablefmt', default='pipe', help='Tabulate table format (default: pipe)')
+    parser.add_argument('--quiet', '-q', action='count', default=0)
+    parser.add_argument('s', help='String to parse')
    
     opts = parser.parse_args()
+    print(opts)
 
-    main(s, opts)
+    main(opts.s, opts)

@@ -112,7 +112,7 @@ class Parse(object):
     _original = None
 
     def __init__(self, s):
-        self.s = s
+        self.s = strip_fully_surrounded(s)
         self._original = s
 
     def parseholder(self, s):
