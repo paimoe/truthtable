@@ -1,13 +1,7 @@
 import re
 import numpy as np
 
-__all__ = ['Parse', 'Item', 'contains', 'AND', 'OR']
-
-a = 'p + q . r'
-b = '~p + q'
-c = '(a + b) . c'
-d = '(a + b) . (c . d)'
-e = '(a + b . (~e . f))'
+__all__ = ['Parse', 'Item', 'contains', 'AND', 'OR', 'strip_fully_surrounded']
 
 def contains(needle, stack): 
     return needle in stack
@@ -62,11 +56,12 @@ class Item(object):
         while has_ph(k):
             # Match and replace
             for mnum, match in enumerate(re.finditer(ph_key_match, k, re.MULTILINE)):
+                #print('Match {mnum} on s={s} was found: {g}'.format(mnum=mnum, s=k, g=match.groups()))
                 g = match.group(0)
                 newlabel = '({})'.format(lookup[g].label())
                 if type(lookup[g]).__name__ == 'NOT':
                     newlabel = strip_fully_surrounded(newlabel)
-                k = strip_fully_surrounded(re.sub(ph_key_match, newlabel, k))
+                k = strip_fully_surrounded(re.sub(re.escape(g), newlabel, k))
         return k
 
 class AND(Item):
@@ -133,7 +128,7 @@ class Parse(object):
         block = init.rsplit('(', 1)
 
         innermost = block[1]
-        #print(init, block)
+        
         remainder_left = block[0]
 
         self.ph_id += 1
@@ -148,18 +143,15 @@ class Parse(object):
     def parse(self):
         if self.s.count('(') != self.s.count(')'):
             raise Exception("Unbalanced brackets")
-        #t = t.replace('}', ' } ').replace('{', ' { ').replace('=', ' = ').replace("\n", " ")
 
         # Run clean first to match all the simple NOTs
-        self.s = self.clean(self.s)
+        if contains('~', self.s):
+            self.s = self.clean(self.s)
 
         while contains('(', self.s):
             self.s = self.parseholder(self.s)
 
         self.s = self.clean(self.s)
-
-        print('=== Parsed: {o} => {s}'.format(o=self._original, s=self.s))
-        #print(self.ph_stack)
 
     def clean(self, s):
         """
